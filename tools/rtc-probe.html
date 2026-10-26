@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ARTC 本地入会探针</title>
+<script src="https://g.alicdn.com/apsara-media-box/imp-web-rtc/7.1.9/aliyun-rtc-sdk.js"></script>
+<style>
+body{background:#0b0f17;color:#e5edf8;font:14px/1.6 Consolas,"Microsoft YaHei",monospace;padding:16px}
+h3{color:#5ea0ff}
+.case{margin:6px 0;padding:8px 12px;border:1px solid #223;border-radius:8px;white-space:pre-wrap}
+.ok{border-color:#39c98e;color:#a9f0d4}
+.bad{border-color:#ff6b6b;color:#ffb4b4}
+.run{border-color:#f0a13c;color:#ffd9a0}
+</style>
+</head>
+<body>
+<h3>ARTC 本地入会探针（不经过 Vidu）</h3>
+<div id="out"></div>
+<script>
+"use strict";
+const out = document.getElementById("out");
+function line(cls, txt){
+  const d = document.createElement("div");
+  d.className = "case " + (cls||"");
+  d.textContent = txt;
+  out.appendChild(d);
+  document.title = "探针 " + out.children.length;
+  return d;
+}
+const hex = buf => [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+async function sha256(s){
+  return hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
+}
+async function hmac256(keyStr, msgStr){
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(keyStr),
+      {name:"HMAC", hash:"SHA-256"}, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msgStr)));
+}
+const b64 = s => btoa(unescape(encodeURIComponent(s)));
+
+// 两个候选应用: GUID(直播+控制台·云端小雅) 与 老短ID(经典 RTC 控制台)
+const APPS = [
+  {tag:"GUID-云端小雅", app:"", key:""},
+  {tag:"LEGACY-d2q8koq8", app:"d2q8koq8", key:"e518cf663c7a4fa5b6bf67502553cef9"},
+];
+const channel = "probe-" + Math.floor(Date.now()/1000);
+const uid = "probe-local";
+const GSLB = "https://rgslb.rtc.aliyuncs.com";
+
+function buildTokens(app, key, ch, user, ts){
+  const list = [];
+  list.push({shape:"hmac_b64", make: async ()=>{
+    const d1 = {appid:app, channelid:ch, nonce:"", timestamp:Number(ts), userid:user};
+    const sig = await hmac256(key, JSON.stringify(d1));
+    return b64(JSON.stringify(Object.assign({}, d1, {token: sig})));
+  }});
+  list.push({shape:"hmac_b64+nonce", make: async ()=>{
+    const d1 = {appid:app, channelid:ch, nonce:"123456", timestamp:Number(ts), userid:user};
+    const sig = await hmac256(key, JSON.stringify(d1));
+    return b64(JSON.stringify(Object.assign({}, d1, {token: sig})));
+  }});
+  list.push({shape:"hmac_b64+gslb", make: async ()=>{
+    const d1 = {appid:app, channelid:ch, nonce:"", timestamp:Number(ts), userid:user};
+    const sig = await hmac256(key, JSON.stringify(d1));
+    return b64(JSON.stringify(Object.assign({}, d1, {token: sig, gslb:[GSLB]})));
+  }});
+  list.push({shape:"concat_raw", make: async ()=> sha256(app + key + ch + user + ts)});
+  list.push({shape:"concat_env", make: async ()=>{
+    const t = await sha256(app + key + ch + user + ts);
+    return JSON.stringify({appid:app, channelid:ch, userid:user, timestamp:Number(ts), token:t, gslb:[GSLB]});
+  }});
+  return list;
+}
+
+async function tryJoin(token, user){
+  const engine = window.AliRtcEngine.getInstance();
+  const res = {ok:false, msg:""};
+  try{
+    try{ await AliRtcEngine.isSupported(); }catch(e){}
+    engine.on("error", e=>{ res.msg += " error:" + JSON.stringify(e).slice(0,160); });
+    engine.on("bye", c=>{ res.msg += " bye:" + c; });
+    const call = async (m, ...a)=>{ if (typeof engine[m] === "function") await engine[m](...a); };
+    await call("setChannelProfile", "communication");
+    await call("setDefaultPublishLocalAudioStream", false);
+    await call("setDefaultPublishLocalVideoStream", false);
+    await call("setDefaultSubscribeAllRemoteAudioStreams", true);
+    await call("setDefaultSubscribeAllRemoteVideoStreams", true);
+    await engine.joinChannel(token, user);
+    // 等 2.5s 看有没有 error/bye
+    await new Promise(r=>setTimeout(r, 2500));
+    res.ok = true;
+    res.msg = "joinChannel() 已 resolve" + (res.msg ? " |" + res.msg : "");
+  }catch(e){
+    res.ok = false;
+    res.msg = String(e && e.message || e).slice(0, 220) + (res.msg ? " |" + res.msg : "");
+  }finally{
+    try{ if (typeof engine.leaveChannel === "function") await engine.leaveChannel(); }catch(e){}
+    try{ engine.destroy(); }catch(e){}
+  }
+  return res;
+}
+
+(async ()=>{
+  line("", "channel=" + channel + "  uid=" + uid + "  开始…");
+  if (!window.AliRtcEngine){ line("bad", "AliRTC SDK 未加载"); return; }
+  for (const a of APPS){
+    const ts = String(Math.floor(Date.now()/1000) + 3600);
+    for (const cand of buildTokens(a.app, a.key, channel, uid, ts)){
+      const tag = a.tag + " · " + cand.shape;
+      const d = line("run", "[...] " + tag);
+      try{
+        const token = await cand.make();
+        const r = await tryJoin(token, uid);
+        d.className = "case " + (r.ok ? "ok" : "bad");
+        d.textContent = (r.ok ? "[OK] " : "[X]  ") + tag + " — " + r.msg;
+      }catch(e){
+        d.className = "case bad";
+        d.textContent = "[X]  " + tag + " — 生成/流程异常: " + String(e && e.message || e).slice(0,180);
+      }
+    }
+  }
+  line("", "全部完成");
+})();
+</script>
+</body>
+</html>

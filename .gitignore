@@ -1,0 +1,42 @@
+# ── 凭据与个人配置: 绝不入库 ─────────────────────────────
+config.json
+config.json.bak
+config.*.bak
+.env
+*.key
+*.pem
+
+# ── 运行时状态(每场直播都变) ────────────────────────────
+logs/
+lyrics-cache/
+*.log
+tools/dm-stats.json
+
+# ── 点播歌库 / 音频(版权归原曲方, 不入库) ───────────────
+audio/*
+!audio/README.txt
+*.wav
+*.mp3
+*.flac
+*.m4a
+
+# ── 本地素材(形象/音色/参考图, 自行准备) ─────────────────
+assets/local/
+refs/*
+!refs/README.md
+
+# ── 环境 ───────────────────────────────────────────────
+.venv/
+.venv-align/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# ── 编辑器 / 系统 ──────────────────────────────────────
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
+secrets/
