@@ -82,6 +82,9 @@ tools\stop-vidu.cmd       # 全部停止
 .venv\Scripts\python.exe tools\cost_guard.py --budget-min 5
 ```
 
+> ⚠️ **路径说明**：`tools\start-vidu.cmd` 等脚本默认项目在 `D:\Projects\ai-digital-human-live`。
+> 放到别的盘/目录时，把脚本里的这个路径批量替换成你的实际路径即可（WSL 侧对应 `/mnt/<盘符>/...`）。
+
 到点自动停，实测 1 分钟约 ¥1.88（云端渲染单价 ¥0.03125/秒）。
 
 ### 6. 喂弹幕
